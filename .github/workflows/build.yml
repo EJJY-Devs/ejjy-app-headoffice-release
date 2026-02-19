@@ -1,59 +1,74 @@
-name: Build Electron App
+name: Build & Release Electron Apps
 
 on:
-  push:
-    branches: [main, master, dev]
-  pull_request:
-    branches: [main, master, dev]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+permissions:
+  contents: write
 
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             app: backoffice
-            build_script: 'build:electron'
-            artifact_name: 'backoffice-windows'
+            build_script: build:electron:ci
+            artifact_name: backoffice-windows
           - os: windows-latest
             app: headoffice
-            build_script: 'build:electron:headoffice'
-            artifact_name: 'headoffice-windows'
+            build_script: build:electron:headoffice:ci
+            artifact_name: headoffice-windows
           - os: macos-latest
             app: backoffice
-            build_script: 'build:electron:mac'
-            artifact_name: 'backoffice-macos'
+            build_script: build:electron:mac:ci
+            artifact_name: backoffice-macos
           - os: macos-latest
             app: headoffice
-            build_script: 'build:electron:headoffice:mac'
-            artifact_name: 'headoffice-macos'
+            build_script: build:electron:headoffice:mac:ci
+            artifact_name: headoffice-macos
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 16.13.2
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          node-version: 16.13.2
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build React app
-        run: npm run build:local
+        run: npm run build:local:ci
 
-      - name: Build Electron app (${{ matrix.app }})
+      - name: Setup Python (macOS only)
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Create Python symlink (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          echo "Python3 location: $(which python3)"
+          echo "Python location: $(which python || echo 'not found')"
+          sudo ln -sf $(which python3) /usr/bin/python || true
+          echo "After symlink - Python location: $(which python || echo 'not found')"
+
+      - name: Build & publish Electron app (${{ matrix.app }})
         run: npm run ${{ matrix.build_script }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use a PAT in Actions secret GH_TOKEN when publishing to other repos
+          # (e.g. headoffice publishes to a different repo).
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/
+          path: dist/**
